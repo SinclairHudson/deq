@@ -168,8 +168,8 @@ class VariationalHidDropout(nn.Module):
         assert self.mask is not None, "You need to reset mask before using VariationalHidDropout"
         mask = self.mask.expand_as(x)  # Make sure the dimension matches
         return mask * x
-    
-    
+
+
 class VariationalAttnDropout(VariationalHidDropout):
     def __init__(self, dropout=0.0, temporal=True):
         super(VariationalAttnDropout, self).__init__(dropout)
@@ -195,10 +195,10 @@ def _norm(p, dim):
         return p.norm()
     elif dim == 0:
         output_size = (p.size(0),) + (1,) * (p.dim() - 1)
-        return p.contiguous().view(p.size(0), -1).norm(dim=1).view(*output_size)
+        return p.float().contiguous().view(p.size(0), -1).norm(dim=1).view(*output_size).bfloat16()
     elif dim == p.dim() - 1:
         output_size = (1,) * (p.dim() - 1) + (p.size(-1),)
-        return p.contiguous().view(-1, p.size(-1)).norm(dim=0).view(*output_size)
+        return p.float().contiguous().view(-1, p.size(-1)).norm(dim=0).view(*output_size).bfloat16()
     else:
         return _norm(p.transpose(0, dim), 0).transpose(0, dim)
 

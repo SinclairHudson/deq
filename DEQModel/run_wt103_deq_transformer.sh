@@ -3,7 +3,6 @@
 if [[ $1 == 'train' ]]; then
     echo 'Run training (DEQ-Transformer)...'
     python train_transformer.py \
-        --cuda \
         --data ../data/wikitext-103/ \
         --dataset wt103 \
         --adaptive \
@@ -30,9 +29,8 @@ if [[ $1 == 'train' ]]; then
         --f_thres 30 \
         --b_thres 40 \
         --subseq_len 75 \
-        --batch_size 56 \
-        --gpu0_bsz 14 \
-        --multi_gpu \
+        --batch_size 2 \
+        --gpu0_bsz 2\
         ${@:2}
 elif [[ $1 == 'eval' ]]; then
     echo 'Not supported yet'

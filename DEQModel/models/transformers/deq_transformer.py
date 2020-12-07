@@ -29,7 +29,7 @@ class WeightSharePositionwiseFF(nn.Module):
         self.drop2 = VariationalHidDropout(dropout=dropout)
 
         self.pre_lnorm = pre_lnorm
-    
+
     def wnorm(self):
         print("Weight normalization applied to PosFF")
         self.ff1_net, self.ff1_fn = weight_norm(module=self.ff1_net, names=['weight'], dim=0)
@@ -66,7 +66,7 @@ class WeightSharePositionwiseFF(nn.Module):
 
 class WeightShareSelfAttention(nn.Module):
     # This is similar to the RelPartialLearnableMultiHeadAttn class in Transformer-XL
-    def __init__(self, d_model, n_head, d_head, dropout, dropatt, 
+    def __init__(self, d_model, n_head, d_head, dropout, dropatt,
                  pre_lnorm=False, local_size=None):
         super(WeightShareSelfAttention, self).__init__()
         self.d_model = d_model
@@ -85,7 +85,7 @@ class WeightShareSelfAttention(nn.Module):
 
         self.pre_lnorm = pre_lnorm
         self.local_size = local_size
-        
+
     def wnorm(self):
         print("Weight normalization applied to SA")
         self.qkv_net, self.qkv_fn = weight_norm(module=self.qkv_net, names=['weight'], dim=0)
@@ -122,13 +122,16 @@ class WeightShareSelfAttention(nn.Module):
 
     def forward(self, z1ss, pos_emb, u1ss, mems=None):
         # Note: In this context, qlen means the length of the (small) subsequence; and mlen describes
-        #       the length of the padding. Their sum is klen. 
+        #       the length of the padding. Their sum is klen.
+        print(z1ss.dtype)
+        print(pos_emb.dtype)
+        print(u1ss.dtype)
         bsz, d_model, qlen = z1ss.size()
         r_w_bias, r_r_bias = self.r_w_bias, self.r_r_bias
         n_head, d_head = self.n_head, self.d_head
         rlen = pos_emb.size(2)
-        
-        if mems is None: 
+
+        if mems is None:
             mems = torch.tensor([]).view(0,0,0)
         mlen = mems.size(2)
         cat = torch.cat([mems, z1ss], dim=-1)
@@ -160,7 +163,7 @@ class WeightShareSelfAttention(nn.Module):
 
         attn_score = AC + BD        # bsz x n_head x qlen x klen
         attn_score.mul_(self.scale)
-            
+
         # Compute attention probability
         # We apply a local mask, with local horizon size of mlen
         local_size = self.local_size or 1000
@@ -169,19 +172,19 @@ class WeightShareSelfAttention(nn.Module):
         if attn_mask is not None and attn_mask.any().item():
             attn_score = attn_score.float().masked_fill(
                     attn_mask[None], -float('inf')).type_as(attn_score)
-                
+
         attn_prob = F.softmax(attn_score, dim=-1)          # bsz x n_head x qlen x klen
-            
+
         # Compute attention vector
         attn_vec = torch.einsum('bnij,bndj->bndi', (attn_prob, w_head_v))
-        
+
         # [bsz x d x qlen]
         attn_vec = attn_vec.contiguous().view(bsz, n_head*d_head, attn_vec.size(-1))
 
         # Linear projection
         attn_out = self.o_net(attn_vec)
         attn_out = self.drop(attn_out)
-        
+
         # Residual connection + layer normolization (if applicable)
         if self.pre_lnorm:
             out = attn_out + z1ss
@@ -199,7 +202,7 @@ class RelPartialLearnableDecoderLayer(nn.Module):
         self.dec_attn = WeightShareSelfAttention(d_model, n_head, d_head, dropout,
                                                  dropatt=0.0, pre_lnorm=pre_lnorm,  local_size=local_size)
         self.pos_ff = WeightSharePositionwiseFF(d_model, d_inner, dropout, pre_lnorm=pre_lnorm)
-    
+
     def wnorm(self):
         self.dec_attn.wnorm()
         self.pos_ff.wnorm()
@@ -288,10 +291,10 @@ class DEQTransformerLM(nn.Module):
 
     def load_weights(self, params_dict):
         self.load_state_dict(params_dict)
-   
+
     def save_weights(self, name='pretrained_deq'):
-        with open(f'{name}.pkl', 'wb') as f:
-            print(f"Saving weights at {name}.pkl")
+        with open(f'pretrained_deq.pkl', 'wb') as f:
+            print(f"Saving weights at pretrained_deq.pkl")
             torch.save(self.state_dict(), f)
 
     def init_mems(self):
@@ -303,10 +306,10 @@ class DEQTransformerLM(nn.Module):
         with torch.no_grad():
             mems = [torch.empty(0), torch.empty(0)]
             return mems       # For z0 and u0
-            
+
     def _update_mems(self, z1s, us, z0, qlen, mlen):
         # does not deal with None
-        if self.mem_len <= 0: 
+        if self.mem_len <= 0:
             print("_update_mems: Hmmmm... you shouldn't be here.")
             return None
 
@@ -334,10 +337,11 @@ class DEQTransformerLM(nn.Module):
         :return: tuple(output sequence, new memory)
         """
         # Assume dec_inp has shape (qlen x bsz)
-        dec_inp = dec_inp.t()                              
+        dec_inp = dec_inp.t()
         bsz, qlen = dec_inp.size()
         word_emb = self.word_emb(dec_inp)
         word_emb = self.iodrop(word_emb, self.dropout)
+        word_emb = word_emb.bfloat16()
         u1s = self.inject_conv(word_emb.transpose(1,2))      # bsz x 3*d_model x qlen
 
         z0, u0 = mems
@@ -367,7 +371,7 @@ class DEQTransformerLM(nn.Module):
             # Compute the equilibrium via DEQ. When in training mode, we need to register the analytical backward
             # pass according to the Theorem 1 in the paper.
             z1s = self.deq(z1s, us, z0, pos_emb=pos_emb, subseq_len=subseq_len, threshold=f_thres, train_step=train_step)
-                    
+
         core_out = self.iodrop(z1s, self.dropout)
         core_out = core_out.permute(2,0,1).contiguous()       # qlen x bsz x d_model
         new_mems = self._update_mems(z1s, us, z0, mlen, qlen)
@@ -381,7 +385,7 @@ class DEQTransformerLM(nn.Module):
         if data.get_device() == 0:
             for i in range(1, 4):
                 assert (self.crit.out_projs[i].weight.data == self.word_emb.emb_projs[i].weight.data).all(), "WARNING"
-        if not mems: 
+        if not mems:
             mems = self.init_mems()
         else:
             for i in range(len(mems)):
@@ -389,7 +393,7 @@ class DEQTransformerLM(nn.Module):
         qlen, bsz = data.size()
         mlen = 0 if mems[0].nelement() == 0 else mems[0].size(2)
         klen = mlen + qlen
-        
+
         # Reset dropout in self.func, and copy everything (weights, dropout masks) to self.func_copy
         self.drop.reset_mask(torch.zeros(1, self.d_model, klen))
         self.func.reset(bsz, qlen, klen)
@@ -399,9 +403,9 @@ class DEQTransformerLM(nn.Module):
         subseq_len = kwargs.get('subseq_len', 75)
         f_thres = kwargs.get('f_thres', 30)
         b_thres = kwargs.get('b_thres', 40)
-        hidden, new_mems = self._forward(data, subseq_len=subseq_len, mems=mems, 
+        hidden, new_mems = self._forward(data, subseq_len=subseq_len, mems=mems,
                                          f_thres=f_thres, b_thres=b_thres, train_step=train_step)
-        
+
         pred_hid = hidden[-tgt_len:]
         loss = self.crit(pred_hid.view(-1, pred_hid.size(-1)), target.contiguous().view(-1))
         loss = loss.view(tgt_len, -1)

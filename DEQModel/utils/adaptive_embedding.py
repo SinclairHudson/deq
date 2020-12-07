@@ -52,8 +52,8 @@ class AdaptiveEmbedding(nn.Module):
                     continue
 
                 inp_i = inp_flat.index_select(0, indices_i) - l_idx
-                emb_i = self.emb_layers[i](inp_i)
-                emb_i = F.linear(emb_i, self.emb_projs[i].weight)
+                emb_i = self.emb_layers.float()[i](inp_i)
+                emb_i = F.linear(emb_i, self.emb_projs[i].weight.float())
 
                 emb_flat.index_copy_(0, indices_i, emb_i)
 
