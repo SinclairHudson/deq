@@ -1,4 +1,6 @@
 # coding: utf-8
+# Sinclair's note:
+# bash run_wt103_deq_transformer.sh train  --f_thres 30 --b_thres 40 --subseq_len 75 --load float-baseline.pkl
 import argparse
 import time
 import math
@@ -347,14 +349,19 @@ def evaluate(eval_iter):
     with torch.no_grad():
         mems = []
         for i, (data, target, seq_len) in enumerate(eval_iter):
+            print(i)
             if 0 < args.max_eval_steps <= i:
                 break
+            # at this point we're taking in and getting out tokens
             ret = para_model(data, target, mems, train_step=train_step, f_thres=args.f_thres,
                         b_thres=args.b_thres, subseq_len=subseq_len)
             loss, mems = ret[0], ret[1:]
             loss = loss.mean()
             total_loss += seq_len * loss.float().item()
             total_len += seq_len
+            print("loss: ", loss.float().item())
+            print("total_loss: ", total_loss)
+            print("total_len: ", total_len)
 
     model.train()
     return total_loss / total_len
@@ -478,13 +485,8 @@ best_val_loss = None
 # logging('=' * 100)
 # print("+"*80)
 
-for W in model.parameters():
-    W = W.bfloat16()
 
 model.bfloat16()
-
-for name, W in model.named_parameters():
-    print(W.dtype)
 
 print("+"*80)
 test_loss = evaluate(te_iter)

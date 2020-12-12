@@ -56,12 +56,12 @@ class WeightSharePositionwiseFF(nn.Module):
 
         if self.pre_lnorm:
             inp = F.layer_norm(inp.transpose(1,2), (self.d_model,)).transpose(1,2)
-        relu_out1 = self.drop1(F.relu(self.ff1_net(inp)))
+        relu_out1 = self.drop1(F.relu(self.ff1_net(inp).float())).bfloat16()
         out2 = self.drop2(self.ff2_net(relu_out1))
         output = out2 + inp
         if not self.pre_lnorm:
-            output = F.layer_norm(output.transpose(1,2), (self.d_model,)).transpose(1,2)
-        return output
+            output = F.layer_norm(output.transpose(1,2).float(), (self.d_model,)).transpose(1,2)
+        return output.bfloat16()
 
 
 class WeightShareSelfAttention(nn.Module):
@@ -123,9 +123,9 @@ class WeightShareSelfAttention(nn.Module):
     def forward(self, z1ss, pos_emb, u1ss, mems=None):
         # Note: In this context, qlen means the length of the (small) subsequence; and mlen describes
         #       the length of the padding. Their sum is klen.
-        print(z1ss.dtype)
-        print(pos_emb.dtype)
-        print(u1ss.dtype)
+        z1ss = z1ss.bfloat16()
+        pos_emb = pos_emb.bfloat16()
+        u1ss = u1ss.bfloat16()
         bsz, d_model, qlen = z1ss.size()
         r_w_bias, r_r_bias = self.r_w_bias, self.r_r_bias
         n_head, d_head = self.n_head, self.d_head
@@ -156,9 +156,16 @@ class WeightShareSelfAttention(nn.Module):
 
         # Compute attention score
         rw_head_q = w_head_q + r_w_bias[:,:,None]                   # bsz x n_head x d_head x qlen
+        rw_head_q = rw_head_q.float()
+        w_head_k = w_head_k.float()
         AC = torch.einsum('bndi,bndj->bnij', rw_head_q, w_head_k)
+        AC = AC.bfloat16()
         rr_head_q = w_head_q + r_r_bias[:,:,None]
+
+        rr_head_q = rr_head_q.float()
+        r_head_k = r_head_k.float()
         BD = torch.einsum('bndi,ndj->bnij', rr_head_q, r_head_k)
+        BD = BD.bfloat16()
         BD = self._rel_shift(BD)    # for relative positional embedding
 
         attn_score = AC + BD        # bsz x n_head x qlen x klen
@@ -173,10 +180,11 @@ class WeightShareSelfAttention(nn.Module):
             attn_score = attn_score.float().masked_fill(
                     attn_mask[None], -float('inf')).type_as(attn_score)
 
-        attn_prob = F.softmax(attn_score, dim=-1)          # bsz x n_head x qlen x klen
+        # bsz x n_head x qlen x klen
+        attn_prob = F.softmax(attn_score.float(), dim=-1)
 
         # Compute attention vector
-        attn_vec = torch.einsum('bnij,bndj->bndi', (attn_prob, w_head_v))
+        attn_vec = torch.einsum('bnij,bndj->bndi', (attn_prob, w_head_v.float())).bfloat16()
 
         # [bsz x d x qlen]
         attn_vec = attn_vec.contiguous().view(bsz, n_head*d_head, attn_vec.size(-1))
@@ -189,8 +197,8 @@ class WeightShareSelfAttention(nn.Module):
         if self.pre_lnorm:
             out = attn_out + z1ss
         else:
-            out = F.layer_norm((attn_out + z1ss).transpose(1,2), (d_model,)).transpose(1,2)
-        return out
+            out = F.layer_norm((attn_out + z1ss).float().transpose(1,2), (d_model,)).transpose(1,2)
+        return out.bfloat16()
 
 
 class RelPartialLearnableDecoderLayer(nn.Module):
@@ -355,22 +363,11 @@ class DEQTransformerLM(nn.Module):
         klen = mlen + qlen    # qlen is seq_len, mlen is pad_len
 
         pos_seq = torch.arange(klen-1, -1, -1.0)
-        pos_emb = self.drop(self.pos_emb(pos_seq))     # bsz x d_model x (qlen + mlen) for positional embedding
-        us = torch.cat([u0, u1s], dim=2)
-        z1s = torch.zeros(bsz, d_model, qlen)          # bsz x d_model x (qlen + mlen) for initial estimate of output
+        pos_emb = self.drop(self.pos_emb(pos_seq)).bfloat16()     # bsz x d_model x (qlen + mlen) for positional embedding
+        us = torch.cat([u0, u1s], dim=2).bfloat16()
+        z1s = torch.zeros(bsz, d_model, qlen).bfloat16()          # bsz x d_model x (qlen + mlen) for initial estimate of output
 
-        if 0 <= train_step < self.pretrain_steps:
-            # In pretraining mode with stacked (weight-tied) layers. NOT recommended for large models (as then
-            # a stacking of, for example, 16 layers would be extremely inefficient). One can also train with
-            # M layers and evaluate using N layers (which typically leads to worse performance).
-            n_layer = self.n_layer if self.training or train_step > 0 else self.eval_n_layer
-            torch.cuda.empty_cache()
-            for i in range(n_layer):
-                z1s = self.func(z1s, us, z0, pos_emb)
-        else:
-            # Compute the equilibrium via DEQ. When in training mode, we need to register the analytical backward
-            # pass according to the Theorem 1 in the paper.
-            z1s = self.deq(z1s, us, z0, pos_emb=pos_emb, subseq_len=subseq_len, threshold=f_thres, train_step=train_step)
+        z1s = self.deq(z1s, us, z0, pos_emb=pos_emb, subseq_len=subseq_len, threshold=f_thres, train_step=train_step)
 
         core_out = self.iodrop(z1s, self.dropout)
         core_out = core_out.permute(2,0,1).contiguous()       # qlen x bsz x d_model

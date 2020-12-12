@@ -62,7 +62,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
         else:
             # if CUDA_MAJOR <= 9 and CUDA_MINOR <= 1:
             proj_hid = F.linear(hidden, proj.weight.t().contiguous())
-            logit = F.linear(proj_hid, weight, bias=bias)
+            logit = F.linear(proj_hid.bfloat16(), weight.bfloat16(), bias=bias.bfloat16())
             # else:
             #     logit = torch.einsum('bd,de,ev->bv', (hidden, proj, weight.t()))
             #     if bias is not None:
@@ -84,7 +84,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
             logit = self._compute_logit(hidden, self.out_layers[0].weight,
                                         self.out_layers[0].bias, self.out_projs[0])
             nll = -F.log_softmax(logit, dim=-1) \
-                    .gather(1, target.unsqueeze(1)).squeeze(1)
+                    .float().gather(1, target.unsqueeze(1)).squeeze(1).bfloat16()
         else:
             # construct weights and biases
             weights, biases = [], []
@@ -129,7 +129,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                 head_logprob_i = head_logprob.index_select(0, indices_i)
 
                 if i == 0:
-                    logprob_i = head_logprob_i.gather(1, target_i[:,None]).squeeze(1)
+                    logprob_i = head_logprob_i.float().gather(1, (target_i[:,None])).squeeze(1).bfloat16()
                 else:
                     weight_i, bias_i, proj_i = weights[i], biases[i], self.out_projs[i]
 
@@ -139,7 +139,7 @@ class ProjectedAdaptiveLogSoftmax(nn.Module):
                     tail_logprob_i = F.log_softmax(tail_logit_i, dim=1)
 
                     logprob_i = head_logprob_i[:, -i] \
-                              + tail_logprob_i.gather(1, target_i[:,None]).squeeze(1)
+                              + tail_logprob_i.float().gather(1, target_i[:,None]).squeeze(1).bfloat16()
 
                 if (hasattr(self, 'keep_order') and self.keep_order) or keep_order:
                     nll.index_copy_(0, indices_i, -logprob_i)

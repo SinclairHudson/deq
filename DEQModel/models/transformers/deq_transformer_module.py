@@ -17,7 +17,7 @@ class TransformerDEQModule(DEQModule):
 
     def __init__(self, func, func_copy):
         super(TransformerDEQModule, self).__init__(func, func_copy)
-        
+
     def _solve_by_subseq(self, z1s, us, z0, pos_emb, threshold, train_step, subseq_len=100):
         z1s_out = torch.zeros_like(z1s)
         with torch.no_grad():
@@ -32,7 +32,7 @@ class TransformerDEQModule(DEQModule):
                 res = RootFind.apply(self.func, z1ss, uss, z0_temp, pos_embss, threshold, train_step)
                 z0_temp = res
                 z1s_out[:,:,t:t+subseq_len] = res
-        
+
         z1s = z1s_out
         z1s_out = torch.zeros_like(z1s)
         z0_temp = z0
@@ -49,6 +49,7 @@ class TransformerDEQModule(DEQModule):
         return z1s_out
 
     def forward(self, z1s, us, z0, **kwargs):
+        z0 = z0.bfloat16()
         bsz, d_model, seq_len = z1s.size()
         pad_len = z0.size(2)
         train_step = kwargs.get('train_step', -1)
@@ -59,7 +60,7 @@ class TransformerDEQModule(DEQModule):
         if us is None or pos_emb is None:
             raise ValueError("Input injection and positional encodings are required.")
 
-        # Use this line for longer sequences: 
+        # Use this line for longer sequences:
         #     self._solve_by_subseq(z1s, us, z0, pos_emb, threshold, train_step, subseq_len=subseq_len)
 
         # Use these lines for shorter sequences:
@@ -69,4 +70,4 @@ class TransformerDEQModule(DEQModule):
             z1s_out = self.Backward.apply(self.func_copy, z1s_out, us, z0, pos_emb, threshold, train_step)
         return z1s_out
 
-        
+
