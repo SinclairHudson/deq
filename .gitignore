@@ -11,6 +11,7 @@ __pycache__/
 LM*/
 copy_memory/
 submissions/
+wandb/
 Mess/
 .ipynb_checkpoint/
 *.ipynb
