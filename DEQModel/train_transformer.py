@@ -168,7 +168,7 @@ print(f"Experiment name: {args.name}")
 assert args.mem_len > 0, "For now you must set mem_len > 0 when using deq"
 args.work_dir += "deq"
 args.cuda = torch.cuda.is_available()
-    
+
 if args.d_embed < 0:
     args.d_embed = args.d_model
 
@@ -345,13 +345,13 @@ def evaluate(eval_iter):
         for i, (data, target, seq_len) in enumerate(eval_iter):
             if 0 < args.max_eval_steps <= i:
                 break
-            ret = para_model(data, target, mems, train_step=train_step, f_thres=args.f_thres, 
+            ret = para_model(data, target, mems, train_step=train_step, f_thres=args.f_thres,
                         b_thres=args.b_thres, subseq_len=subseq_len)
             loss, mems = ret[0], ret[1:]
             loss = loss.mean()
             total_loss += seq_len * loss.float().item()
             total_len += seq_len
-    
+
     model.train()
     return total_loss / total_len
 
@@ -378,22 +378,22 @@ def train():
             for i in range(args.batch_chunk):
                 data_i = data_chunks[i].contiguous()
                 target_i = target_chunks[i].contiguous()
-                ret = para_model(data_i, target_i, mems[i], train_step=train_step, f_thres=args.f_thres, 
+                ret = para_model(data_i, target_i, mems[i], train_step=train_step, f_thres=args.f_thres,
                                  b_thres=args.b_thres, subseq_len=subseq_len)
                 loss, mems[i] = ret[0], ret[1:]         # mems[i]: # 3 x bsz
                 loss = loss.float().mean().type_as(loss) / args.batch_chunk
                 loss.backward()
                 train_loss += loss.float().item()
-                
+
         else:
             # Mode 2: Normal training with one batch per iteration
-            ret = para_model(data, target, mems, train_step=train_step, f_thres=args.f_thres, 
+            ret = para_model(data, target, mems, train_step=train_step, f_thres=args.f_thres,
                              b_thres=args.b_thres, subseq_len=subseq_len)
             loss, mems = ret[0], ret[1:]
             loss = loss.float().mean().type_as(loss)
             loss.backward()
             train_loss += loss.float().item()
-            
+
         torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
         optimizer.step()
         train_step += 1
@@ -449,12 +449,12 @@ def train():
                 scheduler.step(val_loss)
 
             eval_start_time = time.time()
-        
+
         if train_step == args.pretrain_steps and (args.pretrain_steps - args.start_train_steps) > 4000:
             print("You are using pre-training, which has completed :-)")
             model.save_weights(f"pretrain_{train_step}_{args.name}")
             torch.cuda.empty_cache()
-            
+
         if train_step == args.max_step:
             break
 
@@ -473,7 +473,7 @@ if args.eval:
     logging('=' * 100)
     logging('| End of training | valid loss {:5.2f} | valid ppl {:9.3f}'.format(valid_loss, math.exp(valid_loss)))
     logging('=' * 100)
-        
+
     test_loss = evaluate(te_iter)
     logging('=' * 100)
     logging('| End of training | test loss {:5.2f} | test ppl {:9.3f}'.format(test_loss, math.exp(test_loss)))
