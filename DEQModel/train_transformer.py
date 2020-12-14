@@ -195,7 +195,7 @@ if torch.cuda.is_available():
 
 device = torch.device('cuda' if args.cuda else 'cpu')
 
-print(device)
+print("Using device: ", device)
 ###############################################################################
 # Load data
 ###############################################################################

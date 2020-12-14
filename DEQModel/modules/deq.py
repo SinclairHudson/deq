@@ -32,7 +32,7 @@ class RootFind(Function):
         g = lambda x: RootFind.g(func, x, uss, z0, *args)
         result_info = broyden(g, z1ss_est, threshold=threshold, eps=eps, name="forward")
         z1ss_est = result_info['result']
-            
+
         if threshold > 100:
             torch.cuda.empty_cache()
         return z1ss_est.clone().detach()
@@ -55,10 +55,10 @@ class RootFind(Function):
         grad_args = [None for _ in range(ctx.args_len)]
         return (None, grad_z1, None, None, *grad_args)
 
-    
+
 class DEQModule(nn.Module):
 
-    """ 
+    """
     The equilibrium solver module. Forward pass is unspecified; we provide an implementation of the
     implicit differentiation through the equilibrium point in the inner `Backward` class.
     """
@@ -76,9 +76,9 @@ class DEQModule(nn.Module):
         A 'dummy' function that does nothing in the forward pass and perform implicit differentiation
         in the backward pass. Essentially a wrapper that provides backprop for the `DEQModule` class.
         You should use this inner class in DEQModule's forward() function by calling:
-        
+
             self.Backward.apply(self.func_copy, ...)
-            
+
         """
         @staticmethod
         def forward(ctx, func_copy, z1ss, uss, z0, *args):
@@ -117,7 +117,7 @@ class DEQModule(nn.Module):
 
             result_info = broyden(g, dl_df_est, threshold=threshold, eps=eps, name="backward")
             dl_df_est = result_info['result']
-            
+
             y.backward(torch.zeros_like(dl_df_est), retain_graph=False)
 
             grad_args = [None for _ in range(len(args))]
